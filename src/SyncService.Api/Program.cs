@@ -1,9 +1,20 @@
+using SyncService.Core.Interfaces;
+using SyncService.Core.Services;
+using SyncService.Infrastructure.Services;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
-// Learn more about configuring Swagger/OpenAPI at [https://aka.ms/aspnetcore/swashbuckle](https://aka.ms/aspnetcore/swashbuckle)
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+
+// 1. Register custom application services
+builder.Services.AddScoped<IExternalInventoryService, MockExternalInventoryService>();
+builder.Services.AddScoped<ID365DataverseConnector, MockD365DataverseConnector>();
+builder.Services.AddScoped<ISynchronizationOrchestrator, SynchronizationOrchestrator>();
+
+// 2. Register services for controllers and API documentation
+builder.Services.AddControllers();          // Tells the app to use controller routing
+builder.Services.AddEndpointsApiExplorer(); // Needed for Swagger
+builder.Services.AddSwaggerGen();           // Needed for Swagger
 
 var app = builder.Build();
 
@@ -16,6 +27,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-// We will add controller mapping later
+// Routing for controllers
+app.MapControllers();
 
 app.Run();

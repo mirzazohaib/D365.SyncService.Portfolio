@@ -47,3 +47,17 @@ The goal is to synchronize product stock levels:
 2.  The Core Synchronization Service asks the **External Inventory System (Mock)** for the current stock list.
 3.  The Core Synchronization Service compares the list and calls the **D365 Dataverse Connector (Mock)** to update or create `ProductInventory` records.
 4.  Any critical error is logged and returned in the API response.
+
+## 🚀 Demonstration (Pics & GIFs)
+
+### Unit Test Execution
+
+This GIF shows the dotnet test command running and verifying the core business logic in isolation.
+
+![dotnet test](assets/dotnet-test.gif)
+
+### API Functionality
+
+The following GIF shows the API being executed via Swagger, calling the mock services, and returning a successful result.
+
+![dotnet run - SwaggerUI](assets/swagger-demo.gif)
