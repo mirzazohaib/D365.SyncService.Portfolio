@@ -2,7 +2,9 @@
 // endpoint used to trigger the synchronization process.
 
 using Microsoft.AspNetCore.Mvc;
-using System.Threading.Tasks; // Added for Task<IActionResult>
+using SyncService.Core.Interfaces;
+using SyncService.Core.Models;
+using System.Threading.Tasks;
 
 namespace SyncService.Api.Controllers
 {
@@ -10,19 +12,32 @@ namespace SyncService.Api.Controllers
     [Route("api/[controller]")]
     public class SyncController : ControllerBase
     {
-        // Constructor and service injection will be added later
+        private readonly ISynchronizationOrchestrator _orchestrator;
 
-        // public SyncController(...) { ... }
+        // The ISynchronizationOrchestrator is injected via the constructor by the DI container.
+        public SyncController(ISynchronizationOrchestrator orchestrator)
+        {
+            _orchestrator = orchestrator;
+        }
 
-
-        /// Triggers the full inventory synchronization process.
-        /// (Placeholder implementation for Day 1)
-        [HttpPost("trigger")] // Use "trigger" as per final design
+        /// Triggers a full synchronization of product inventory from the external system to D365.
+        /// The result of the synchronization operation
+        [HttpPost("trigger")] // Use "trigger" as the route
+        [ProducesResponseType(typeof(SyncResult), 200)]
+        [ProducesResponseType(typeof(SyncResult), 500)]
         public async Task<IActionResult> TriggerSync()
         {
-            // Placeholder: Simulate success for now.
-            await Task.Delay(10); // Simulate async work
-            return Ok(new { Status = "Success", Message = "Sync triggered (placeholder)." });
+            var result = await _orchestrator.RunFullSyncAsync();
+
+            if (result.IsSuccessful)
+            {
+                // On success, return an HTTP 200 OK with the SyncResult object.
+                return Ok(result);
+            }
+
+            // On failure, return an HTTP 500 Internal Server Error with the SyncResult object,
+            // which contains the error details.
+            return StatusCode(500, result);
         }
     }
 }
