@@ -79,3 +79,15 @@ This GIF shows the dotnet test command running and verifying the core business l
 The following GIF shows the API being executed via Swagger, calling the mock services, and returning a successful result.
 
 ![dotnet run - SwaggerUI](assets/swagger-demo.gif)
+
+### End-to-End Synchronization with D365
+
+This GIF demonstrates the complete workflow: the D365 environment before the sync, executing the API call via Swagger, and the product records appearing/updating in D365 afterward.
+
+![dotnet run D365 End-to-End Sync- SwaggerUI](assets/swagger-live-end-to-end.gif)
+
+### Error Handling Test
+
+This GIF demonstrates the API returning a 500 Internal Server Error when provided with invalid credentials, showing basic error handling.
+
+![dotnet run Error Handling](assets/swagger-live-test-error-case.gif)
