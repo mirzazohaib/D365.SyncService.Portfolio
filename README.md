@@ -28,6 +28,24 @@ The project follows the Git Flow branching strategy to ensure a professional and
 
 ![Git Flow Diagram](assets/git-flow.png)
 
+The project follows the Git Flow branching strategy to ensure a professional and organized development process.
+
+## Prerequisites for D365 Integration
+
+To run the application against a live Dynamics 365 environment (as implemented in Day 5), the following external components must be set up:
+
+1.  **Power Apps Developer Environment:** A D365/Dataverse instance is required. A free Power Apps Developer Plan environment can be used.
+
+![Developer Environment Example](assets/d365-env.png)
+
+2.  **Azure AD App Registration:** An application must be registered in Microsoft Entra ID (Azure AD) to provide authentication credentials (Client ID, Tenant ID, Client Secret).
+
+![Azure AD App Registration Example](assets/azure-app-reg.png)
+
+3.  **Power Platform Application User:** The Azure AD App Registration must be linked to an Application User within the target Power Platform Environment, and granted appropriate permissions (e.g., System Administrator for development).
+
+![Power Platform Application User Example](assets/pp-app-user.png)
+
 ## Technical Stack & Skills Demonstrated
 
 | **Technology**                | **D365 Relevance**                                                                                                   |
@@ -61,3 +79,15 @@ This GIF shows the dotnet test command running and verifying the core business l
 The following GIF shows the API being executed via Swagger, calling the mock services, and returning a successful result.
 
 ![dotnet run - SwaggerUI](assets/swagger-demo.gif)
+
+### End-to-End Synchronization with D365
+
+This GIF demonstrates the complete workflow: the D365 environment before the sync, executing the API call via Swagger, and the product records appearing/updating in D365 afterward.
+
+![dotnet run D365 End-to-End Sync- SwaggerUI](assets/swagger-live-end-to-end.gif)
+
+### Error Handling Test
+
+This GIF demonstrates the API returning a 500 Internal Server Error when provided with invalid credentials, showing basic error handling.
+
+![dotnet run Error Handling](assets/swagger-live-test-error-case.gif)
