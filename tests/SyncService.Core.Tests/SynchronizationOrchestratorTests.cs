@@ -2,6 +2,8 @@
 using SyncService.Core.Interfaces;
 using SyncService.Core.Models;
 using SyncService.Core.Services;
+using Microsoft.Extensions.Logging;
+
 
 namespace SyncService.Core.Tests;
 
@@ -14,17 +16,24 @@ public class SynchronizationOrchestratorTests
     // The actual class being tested
     private readonly SynchronizationOrchestrator _orchestrator;
 
+    // Mock for the logger
+    private readonly Mock<ILogger<SynchronizationOrchestrator>> _mockLogger; // Mock for the logger
+
+
     public SynchronizationOrchestratorTests()
     {
         // Arrange: This constructor runs before each test.
         // New mock instances created for each test to ensure they are isolated.
         _mockExternalInventoryService = new Mock<IExternalInventoryService>();
         _mockD365Connector = new Mock<ID365DataverseConnector>();
+        _mockLogger = new Mock<ILogger<SynchronizationOrchestrator>>(); // Mock for the logger
+
 
         // A real instance is created of orchestrator, but pass it the MOCK dependencies.
         _orchestrator = new SynchronizationOrchestrator(
             _mockExternalInventoryService.Object,
-            _mockD365Connector.Object
+            _mockD365Connector.Object,
+            _mockLogger.Object // Pass the logger object to the orchestrator
         );
     }
 
@@ -85,6 +94,40 @@ public class SynchronizationOrchestratorTests
         _mockD365Connector.Verify(
             c => c.UpdateProductInventoryBatchAsync(It.IsAny<IEnumerable<ProductDto>>()),
             Times.Never
+        );
+    }
+
+    // Optional: Add a test case for when the D365 connector fails
+    [Fact]
+    public async Task RunFullSyncAsync_WhenD365UpdateFails_ShouldReturnFailure()
+    {
+        // Arrange
+         var productsFromExternalSystem = new List<ProductDto>
+        {
+            new ProductDto { Sku = "SKU001", QuantityOnHand = 10, LastModified = DateTime.UtcNow }
+        };
+
+         _mockExternalInventoryService
+            .Setup(s => s.GetCurrentInventoryAsync())
+            .ReturnsAsync(productsFromExternalSystem);
+
+        // Simulate the D365 connector returning false (failure)
+        _mockD365Connector
+            .Setup(c => c.UpdateProductInventoryBatchAsync(It.IsAny<IEnumerable<ProductDto>>()))
+            .ReturnsAsync(false);
+
+        // Act
+        var result = await _orchestrator.RunFullSyncAsync();
+
+        // Assert
+        Assert.False(result.IsSuccessful);
+        Assert.Equal(0, result.ItemsProcessed); // Should be 0 on failure
+        Assert.NotNull(result.ErrorMessage);
+        Assert.Contains("Failed to update product batch", result.ErrorMessage); // Check error message
+
+        _mockD365Connector.Verify(
+            c => c.UpdateProductInventoryBatchAsync(productsFromExternalSystem),
+            Times.Once // Verify it was still called once
         );
     }
 }

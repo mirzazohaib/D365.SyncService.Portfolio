@@ -91,3 +91,56 @@ This GIF demonstrates the complete workflow: the D365 environment before the syn
 This GIF demonstrates the API returning a 500 Internal Server Error when provided with invalid credentials, showing basic error handling.
 
 ![dotnet run Error Handling](assets/swagger-live-test-error-case.gif)
+
+## 🛠️ Running the Project
+
+### Prerequisites
+
+1.  **.NET 9 SDK** (or later) installed.
+2.  **Git** installed.
+3.  **D365 / Power Apps Developer Environment:** A trial or developer environment with Dataverse provisioned
+4.  **Azure AD App Registration:** An App Registration created in Azure AD with permissions to access Dataverse
+5.  **Power Platform Application User:** An Application User configured in your D365 environment linked to the Azure App Registration and assigned the "System Administrator" role
+6.  **Dataverse Table:** The `Product Inventory` table created in your Dataverse environment with the specified columns (`SKU`, `Quantity On Hand`, `Last Modified External`) and the `SKU Key` alternate key. **Ensure you update the Logical names** in `D365DataverseConnector.cs` to match your specific environment's names.
+
+### Configuration
+
+1.  Clone the repository:
+    ```bash
+    git clone [https://github.com/mirzazohaib/D365.SyncService.Portfolio.git](https://github.com/mirzazohaib/D365.SyncService.Portfolio.git)
+    cd D365.SyncService.Portfolio
+    ```
+2.  Navigate to the API project directory:
+    ```bash
+    cd src/SyncService.Api
+    ```
+3.  Create a new file named `appsettings.Development.json`. **This file is gitignored and must NOT be committed.**
+4.  Add the following structure to `appsettings.Development.json` and replace the placeholder values with your actual credentials from the prerequisites setup:
+    ```json
+    {
+      "Logging": {
+        "LogLevel": {
+          "Default": "Information",
+          "Microsoft.AspNetCore": "Warning"
+        }
+      },
+      "D365": {
+        "EnvironmentUrl": "YOUR_D365_ENVIRONMENT_URL", // e.g., https://org********[.crm.dynamics.com/](https://.crm.dynamics.com/)
+        "ClientId": "YOUR_AZURE_APP_CLIENT_ID",
+        "ClientSecret": "YOUR_AZURE_APP_CLIENT_SECRET_VALUE",
+        "TenantId": "YOUR_AZURE_TENANT_ID"
+      }
+    }
+    ```
+
+### Execution
+
+1.  Navigate back to the **root directory** of the solution.
+2.  Run the API project:
+    ```bash
+    dotnet run --project src/SyncService.Api/SyncService.Api.csproj
+    ```
+3.  The application will start, and a browser window should open to the Swagger UI page (e.g., `http://localhost:5283/swagger`).
+4.  Expand the `POST /api/Sync/trigger` endpoint.
+5.  Click "Try it out", then click "Execute".
+6.  Check the API response in Swagger UI (should be 200 OK with details) and verify the data has been created/updated in your D365 `Product Inventory` table. Check the application's console output for detailed logs.

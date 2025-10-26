@@ -6,6 +6,9 @@ using SyncService.Core.Models;
 using SyncService.Infrastructure.Configuration;
 using System.Net.Http.Headers;
 using System.Net.Http.Json; // Required for GetFromJsonAsync, PostAsJsonAsync etc.
+using System.Text.Json; // Required for JsonSerializerOptions
+using Microsoft.Extensions.Logging; // Required for ILogger, Requires Microsoft.Extensions.Logging package
+
 
 namespace SyncService.Infrastructure.Services
 {
@@ -15,14 +18,19 @@ namespace SyncService.Infrastructure.Services
         private readonly HttpClient _httpClient;
         private readonly D365Config _d365Config;
         private readonly IConfidentialClientApplication _msalClient;
+        private readonly ILogger<D365DataverseConnector> _logger; // Add a logger
+
+        // Constructor
 
         // Using IOptions<D365Config> to access strongly-typed configuration.
         // Using IHttpClientFactory for managing HttpClient instances.
         // Requires Microsoft.Extensions.Http package for HttpClientFactory.
-        public D365DataverseConnector(IOptions<D365Config> d365ConfigOptions, IHttpClientFactory httpClientFactory)
+        public D365DataverseConnector(IOptions<D365Config> d365ConfigOptions, IHttpClientFactory httpClientFactory, ILogger<D365DataverseConnector> logger) // Add the logger
         {
             _d365Config = d365ConfigOptions.Value; // Get the configured D365 settings
             _httpClient = httpClientFactory.CreateClient("D365Client"); // Use a named client
+            _logger = logger; // Logger injected
+
 
             // Validate required configuration
             if (string.IsNullOrWhiteSpace(_d365Config.EnvironmentUrl) ||
@@ -30,6 +38,8 @@ namespace SyncService.Infrastructure.Services
                 string.IsNullOrWhiteSpace(_d365Config.ClientSecret) ||
                 string.IsNullOrWhiteSpace(_d365Config.TenantId))
             {
+                // Log error before throwing
+                _logger.LogError("D365 configuration is missing required values in appsettings.");
                 throw new InvalidOperationException("D365 configuration is missing required values in appsettings.");
             }
 
@@ -52,124 +62,131 @@ namespace SyncService.Infrastructure.Services
             AuthenticationResult? authResult = null;
             try
             {
+                _logger.LogInformation("Attempting to acquire D365 authentication token.");
                 // Acquire token using client credentials flow
                 authResult = await _msalClient.AcquireTokenForClient(scopes).ExecuteAsync();
+                _logger.LogInformation("Successfully acquired D365 authentication token.");
             }
             catch (MsalServiceException ex)
             {
-                // Handle token acquisition failure (log error, throw specific exception)
-                // For simplicity, we re-throw, but real apps should log details.
-                // Consider adding logging here later
+                // Log the specific error from MSAL
+                _logger.LogError(ex, "Failed to acquire D365 authentication token due to MSAL service exception.");
                 throw new InvalidOperationException($"Failed to acquire D365 authentication token: {ex.Message}", ex);
             }
 
             if (authResult == null || string.IsNullOrWhiteSpace(authResult.AccessToken))
             {
+                _logger.LogError("Failed to acquire D365 authentication token (result was null or empty).");
                 throw new InvalidOperationException("Failed to acquire D365 authentication token (result was null or empty).");
             }
 
-            // Set the base address for the HttpClient if not already set by factory
-            if (_httpClient.BaseAddress == null)
-            {
-                 _httpClient.BaseAddress = new Uri(_d365Config.ApiUrl); // Use the calculated API URL
-            }
+            // Configure HttpClient
+            _httpClient.BaseAddress = new Uri(_d365Config.ApiUrl);
+            _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", authResult.AccessToken);
+            _httpClient.DefaultRequestHeaders.Accept.Clear(); // Clear accept headers before adding
+            _httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            _httpClient.DefaultRequestHeaders.Remove("OData-MaxVersion"); // Remove before adding
+            _httpClient.DefaultRequestHeaders.Add("OData-MaxVersion", "4.0");
+            _httpClient.DefaultRequestHeaders.Remove("OData-Version"); // Remove before adding
+            _httpClient.DefaultRequestHeaders.Add("OData-Version", "4.0");
+            _httpClient.DefaultRequestHeaders.Remove("Prefer"); // Remove before adding
+            _httpClient.DefaultRequestHeaders.Add("Prefer", "return=representation");
 
-            // Clear default headers and add the Authorization header with the acquired token
-            _httpClient.DefaultRequestHeaders.Authorization =
-                new AuthenticationHeaderValue("Bearer", authResult.AccessToken);
-
-            // Ensure other standard headers are present (some might be set by factory)
-            if(!_httpClient.DefaultRequestHeaders.Accept.Any(h => h.MediaType == "application/json"))
+            if (_httpClient.Timeout == TimeSpan.FromSeconds(100))
             {
-                _httpClient.DefaultRequestHeaders.Accept.Add(
-                    new MediaTypeWithQualityHeaderValue("application/json"));
+                _httpClient.Timeout = TimeSpan.FromSeconds(60);
             }
-             if(!_httpClient.DefaultRequestHeaders.Contains("OData-MaxVersion"))
-            {
-                _httpClient.DefaultRequestHeaders.Add("OData-MaxVersion", "4.0");
-            }
-            if(!_httpClient.DefaultRequestHeaders.Contains("OData-Version"))
-            {
-                _httpClient.DefaultRequestHeaders.Add("OData-Version", "4.0");
-            }
-
-            // Optional: Configure timeout if not set by factory
-             if (_httpClient.Timeout == TimeSpan.FromSeconds(100)) // Default timeout is often 100s
-             {
-                 _httpClient.Timeout = TimeSpan.FromSeconds(60); // Example: 60 second timeout
-             }
+            _logger.LogInformation("HttpClient configured successfully for D365 API calls.");
         }
 
+        /// <summary>
         /// Attempts to update or create a batch of Product records in D365 Dataverse using the Web API.
-        /// Sends individual PATCH requests for each product for simplicity.
+        /// </summary>
         public async Task<bool> UpdateProductInventoryBatchAsync(IEnumerable<ProductDto> products)
         {
-            await InitializeHttpClientAsync(); // Ensure HttpClient is configured with a valid token
-
             // IMPORTANT: Replace with the actual Logical names from your D365 environment
             string entitySetName = "cr62d_productinventories"; // Plural Logical name of your table
             string keyFieldName = "cr62d_sku"; // Logical name of the SKU field (your alternate key)
             string quantityFieldName = "cr62d_quantityonhand"; // Logical name of the Quantity field
             string lastModFieldName = "cr62d_lastmodifiedexternal"; // Logical name of the Last Modified field
 
-            bool allSucceeded = true; // Track overall success
+            bool allSucceeded = true;
 
-            foreach (var product in products)
+            try
             {
-                // Construct the D365 payload. Keys must be the Logical names of the columns.
-                var payload = new Dictionary<string, object>
+                await InitializeHttpClientAsync();
+                _logger.LogInformation("Starting D365 product inventory batch update for {ProductCount} items.", products.Count());
+
+                foreach (var product in products)
                 {
-                    { keyFieldName, product.Sku }, // Include the key field itself in the payload
-                    { quantityFieldName, product.QuantityOnHand },
-                    { lastModFieldName, product.LastModified }
-                };
-
-                // Construct the URI for the PATCH request using the alternate key
-                // Format: /entitysetname(keyfieldname='keyvalue')
-                string requestUri = $"{entitySetName}({keyFieldName}='{Uri.EscapeDataString(product.Sku)}')";
-
-                try
-                {
-                    // Send PATCH request. PATCH performs an Upsert when using an alternate key.
-                    HttpResponseMessage response = await _httpClient.PatchAsJsonAsync(requestUri, payload);
-
-                    if (!response.IsSuccessStatusCode)
+                    var payload = new Dictionary<string, object>
                     {
-                        // Log the failure details
-                        var errorContent = await response.Content.ReadAsStringAsync();
-                        Console.WriteLine($"INFRA: Failed to update SKU {product.Sku}. Status: {response.StatusCode}. Reason: {errorContent}");
-                        // Log.Error("Failed to update SKU {Sku}. Status: {StatusCode}. Reason: {ErrorContent}",
-                        //     product.Sku, response.StatusCode, errorContent);
+                        { quantityFieldName, product.QuantityOnHand },
+                        { lastModFieldName, product.LastModified.ToUniversalTime() }
+                    };
 
-                        allSucceeded = false; // Mark the overall operation as failed
-                        // Depending on requirements, you might continue processing others or break here.
-                        // continue;
-                        break; // Stop on first failure for simplicity
-                    }
-                    else
+                    string requestUri = $"{entitySetName}({keyFieldName}='{Uri.EscapeDataString(product.Sku)}')";
+                    _logger.LogInformation("Sending PATCH request for SKU {Sku} to URI {RequestUri}", product.Sku, requestUri);
+
+                    try
                     {
-                         // Optionally log success or process the returned record representation if needed
-                        Console.WriteLine($"INFRA: Successfully updated/created SKU {product.Sku}. Status: {response.StatusCode}");
+                        HttpResponseMessage response = await _httpClient.PatchAsJsonAsync(requestUri, payload);
+
+                        if (!response.IsSuccessStatusCode)
+                        {
+                            var errorContent = await response.Content.ReadAsStringAsync();
+                            // Log using structured logging
+                            _logger.LogError("Failed to update SKU {Sku}. Status: {StatusCode}. Reason: {ErrorContent}",
+                                             product.Sku, response.StatusCode, errorContent);
+                            allSucceeded = false;
+                            break; // Stop on first failure
+                        }
+                        else
+                        {
+                            // Log success using structured logging
+                            _logger.LogInformation("Successfully updated/created SKU {Sku}. Status: {StatusCode}",
+                                                   product.Sku, response.StatusCode);
+                        }
                     }
-                }
-                catch (HttpRequestException httpEx)
+                    catch (HttpRequestException httpEx)
+                    {
+                        // Log using structured logging and pass exception
+                        _logger.LogError(httpEx, "HTTP request failed for SKU {Sku}", product.Sku);
+                        allSucceeded = false;
+                        break;
+                    }
+                    catch (JsonException jsonEx)
+                    {
+                        // Log using structured logging and pass exception
+                        _logger.LogError(jsonEx, "JSON serialization failed for SKU {Sku}", product.Sku);
+                        allSucceeded = false;
+                        break;
+                    }
+                } // End foreach loop
+
+                if(allSucceeded)
                 {
-                    Console.WriteLine($"INFRA: HTTP request failed for SKU {product.Sku}: {httpEx.Message}");
-                    // Log.Error(httpEx, "HTTP request failed for SKU {Sku}", product.Sku);
-                    allSucceeded = false;
-                    break;
+                    _logger.LogInformation("D365 product inventory batch update completed successfully.");
                 }
-                catch (Exception ex)
+                else
                 {
-                    Console.WriteLine($"INFRA: An unexpected error occurred processing SKU {product.Sku}: {ex.Message}");
-                    // Log.Error(ex, "Unexpected error processing SKU {Sku}", product.Sku);
-                    allSucceeded = false;
-                    break;
+                     _logger.LogWarning("D365 product inventory batch update completed with one or more failures.");
                 }
+            }
+            catch (InvalidOperationException authEx)
+            {
+                // Error already logged in InitializeHttpClientAsync
+                _logger.LogError(authEx, "Authentication failed during batch update initialization.");
+                return false; // Overall failure
+            }
+            catch (Exception ex)
+            {
+                // Log using structured logging and pass exception
+                _logger.LogError(ex, "An unexpected error occurred during the D365 update batch.");
+                return false; // Indicate overall failure
             }
 
             return allSucceeded;
         }
     }
 }
-
