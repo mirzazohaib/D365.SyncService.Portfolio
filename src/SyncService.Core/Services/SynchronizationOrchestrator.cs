@@ -8,6 +8,9 @@ using System.Linq;
 using System.Threading.Tasks;
 using SyncService.Core.Interfaces;
 using SyncService.Core.Models;
+using Microsoft.Extensions.Logging; // Requires Microsoft.Extensions.Logging package
+
+
 
 namespace SyncService.Core.Services
 {
@@ -15,52 +18,71 @@ namespace SyncService.Core.Services
     {
         private readonly IExternalInventoryService _externalInventoryService;
         private readonly ID365DataverseConnector _d365Connector;
+        private readonly ILogger<SynchronizationOrchestrator> _logger; // Add a logger
+
+        // Constructor
 
         // Dependencies are injected via the constructor
         public SynchronizationOrchestrator(
             IExternalInventoryService externalInventoryService,
-            ID365DataverseConnector d365Connector)
+            ID365DataverseConnector d365Connector, ILogger<SynchronizationOrchestrator> logger) // Add the logger
         {
             _externalInventoryService = externalInventoryService;
             _d365Connector = d365Connector;
+            _logger = logger; // Initialize the logger
         }
 
         public async Task<SyncResult> RunFullSyncAsync()
         {
             try
             {
-                Console.WriteLine("CORE: Starting full inventory synchronization...");
+                _logger.LogInformation("Starting full inventory synchronization..."); // Log the start of the operation
 
                 // 1. Get data from the external system
                 var externalInventory = await _externalInventoryService.GetCurrentInventoryAsync();
 
-                if (externalInventory == null || !externalInventory.Any())
+                // Handle potential null result from service defensively
+                if (externalInventory == null)
                 {
-                    return SyncResult.Success(0); // No items to process
+                    _logger.LogWarning("External inventory service returned null.");
+                    return SyncResult.Failure("Failed to retrieve data from external system (null response).");
                 }
 
-                // In a real application, you would add more complex business logic here:
-                // - Compare against existing D365 records to avoid unnecessary updates.
-                // - Transform or validate data.
-                // - Handle records that exist in D365 but not in the external system.
-                Console.WriteLine($"CORE: Fetched {externalInventory.Count()} items from external source.");
+                var productList = externalInventory.ToList(); // Convert to List for easier handling
+
+                if (!productList.Any())
+                {
+                    _logger.LogInformation("No products found in the external system to synchronize.");
+                    // Return success, but indicate 0 items processed
+                    return SyncResult.Success(0);
+                }
+
+                // Replaced Console.WriteLine with LogInformation using structured logging)
+                _logger.LogInformation("Fetched {ProductCount} items from external source.", productList.Count);
 
                 // 2. Push the data to Dynamics 365
-                var success = await _d365Connector.UpdateProductInventoryBatchAsync(externalInventory);
+                var success = await _d365Connector.UpdateProductInventoryBatchAsync(productList);
 
                 if (!success)
                 {
-                    return SyncResult.Failure("Failed to update records in Dynamics 365. See logs for details.");
+                    // Error details should already be logged by the D365DataverseConnector
+                    // Return a generic failure message suitable for the API consumer
+                    _logger.LogWarning("D365 connector reported failure during batch update.");
+                    return SyncResult.Failure("Failed to update records in Dynamics 365. Check service logs for details.");
                 }
 
-                Console.WriteLine("CORE: Synchronization completed successfully.");
-                return SyncResult.Success(externalInventory.Count());
+                // Replaced Console.WriteLine with LogInformation
+                _logger.LogInformation("Synchronization completed successfully for {ProductCount} items.", productList.Count);
+                return SyncResult.Success(productList.Count);
             }
             catch (Exception ex)
             {
-                // Professional error handling: log the exception (not shown) and return a clean failure message.
-                Console.WriteLine($"CORE: An unexpected error occurred: {ex.Message}");
-                return SyncResult.Failure("An unexpected error occurred during synchronization.");
+                // Refined Error Handling: Log the full exception.
+                // Replaced Console.WriteLine with LogError
+                _logger.LogError(ex, "An unexpected error occurred during the synchronization orchestration.");
+
+                // Return a generic failure message suitable for the API consumer.
+                return SyncResult.Failure("An unexpected error occurred during synchronization. Check service logs for details.");
             }
         }
     }
